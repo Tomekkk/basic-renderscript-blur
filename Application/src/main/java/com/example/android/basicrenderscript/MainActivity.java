@@ -35,7 +35,7 @@ public class MainActivity extends Activity {
        Ideally, this can be reduced to 2, however in some devices, 2 buffers still showing tierings on UI.
        Investigating a root cause.
      */
-    private final int NUM_BITMAPS = 2;
+    private final int NUM_BITMAPS = 3;
     private int mCurrentBitmapIndex = 0;
     private Bitmap mBitmapIn;
     private Bitmap[] mBitmapsOut;
@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
 
     private float blurValue = 0.0001f;
     private float saturationValue = 1f;
-    private float dimValue = 1f;
+    private float dimValue = 0.0f;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,7 +69,7 @@ public class MainActivity extends Activity {
 
         mImageView = (ImageView) findViewById(R.id.imageView);
         mImageView.setImageBitmap(mBitmapsOut[mCurrentBitmapIndex]);
-        mCurrentBitmapIndex = 1;
+        mCurrentBitmapIndex  += (mCurrentBitmapIndex + 1) % NUM_BITMAPS;
 
         SeekBar seekbarBlur = (SeekBar) findViewById(R.id.seekBarBlur);
         seekbarBlur.setProgress(0);
@@ -119,13 +119,14 @@ public class MainActivity extends Activity {
         seekbarDim.setProgress(0);
         seekbarDim.setOnSeekBarChangeListener(new OnSeekBarChangeListener() {
 
-            float max = 1.0f;
-            float min = 0.4f;
+            float max = 0.5f;
 
             public void onProgressChanged(SeekBar seekBar, int progress,
                                           boolean fromUser) {
 
-                dimValue = (float) ((min - max) * (progress / 100.0) + max);
+                float dimValuePercent = (float) (max * (progress/100.0));
+                dimValue = dimValuePercent * 255;
+
                 updateImage();
             }
 
@@ -168,7 +169,7 @@ public class MainActivity extends Activity {
 
         mOutAllocations = new Allocation[NUM_BITMAPS];
         for (int i = 0; i < NUM_BITMAPS; ++i) {
-            mOutAllocations[i] = Allocation.createFromBitmap(mRS, mBitmapIn);
+            mOutAllocations[i] = Allocation.createFromBitmap(mRS, mBitmapsOut[i]);
         }
 
 

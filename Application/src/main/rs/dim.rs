@@ -7,8 +7,8 @@ float dimmingValue = 0.4f;
 uchar4 __attribute__((kernel)) dim(uchar4 in)
 {
     uchar4 out = in;
-    out.r = in.r * dimmingValue;
-    out.g = in.g * dimmingValue;
-    out.b = in.b * dimmingValue;
+    out.r = (in.r - dimmingValue) < 0 ? 0 : (in.r - dimmingValue);
+    out.g = (in.g - dimmingValue) < 0 ? 0 : (in.g - dimmingValue);
+    out.b = (in.b - dimmingValue) < 0 ? 0 : (in.b - dimmingValue);
     return out;
 }
