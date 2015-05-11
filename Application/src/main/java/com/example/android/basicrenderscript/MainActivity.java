@@ -21,10 +21,14 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.support.v8.renderscript.Allocation;
+import android.support.v8.renderscript.RenderScript;
+import android.support.v8.renderscript.ScriptIntrinsicBlur;
 import android.widget.ImageView;
 import android.widget.SeekBar;
 import android.widget.SeekBar.OnSeekBarChangeListener;
-import android.support.v8.renderscript.*;
+
+
 
 public class MainActivity extends Activity {
     /* Number of bitmaps that is used for renderScript thread and UI thread synchronization.
@@ -32,7 +36,7 @@ public class MainActivity extends Activity {
        Investigating a root cause.
      */
     private final int NUM_BITMAPS = 3;
-    private int mCurrentBitmap = 0;
+    private int mCurrentBitmapIndex = 0;
     private Bitmap mBitmapIn;
     private Bitmap[] mBitmapsOut;
     private ImageView mImageView;
@@ -42,9 +46,11 @@ public class MainActivity extends Activity {
     private Allocation[] mOutAllocations;
     private ScriptIntrinsicBlur intrinsicBlur;
     private ScriptC_saturation mScript;
+    private ScriptC_dim scriptDim;
 
     private float blurValue = 0.0001f;
     private float saturationValue = 1f;
+    private float dimValue = 0.0f;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,8 +68,8 @@ public class MainActivity extends Activity {
         }
 
         mImageView = (ImageView) findViewById(R.id.imageView);
-        mImageView.setImageBitmap(mBitmapsOut[mCurrentBitmap]);
-        mCurrentBitmap = 1;
+        mImageView.setImageBitmap(mBitmapsOut[mCurrentBitmapIndex]);
+        mCurrentBitmapIndex  += (mCurrentBitmapIndex + 1) % NUM_BITMAPS;
 
         SeekBar seekbarBlur = (SeekBar) findViewById(R.id.seekBarBlur);
         seekbarBlur.setProgress(0);
@@ -78,10 +84,12 @@ public class MainActivity extends Activity {
 
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {
+
             }
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
+
             }
         });
 
@@ -103,6 +111,33 @@ public class MainActivity extends Activity {
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
+//                updateInAllocation(lastBitmapProcessed);
+            }
+        });
+
+        SeekBar seekbarDim = (SeekBar) findViewById(R.id.seekBarDim);
+        seekbarDim.setProgress(0);
+        seekbarDim.setOnSeekBarChangeListener(new OnSeekBarChangeListener() {
+
+            float max = 0.5f;
+
+            public void onProgressChanged(SeekBar seekBar, int progress,
+                                          boolean fromUser) {
+
+                float dimValuePercent = (float) (max * (progress/100.0));
+                dimValue = dimValuePercent * 255;
+
+                updateImage();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+
             }
         });
 
@@ -110,7 +145,7 @@ public class MainActivity extends Activity {
          * Create renderScript
          */
         createScript();
-        
+
 
 
     }
@@ -125,16 +160,16 @@ public class MainActivity extends Activity {
 
         //Allocate buffers
         mInAllocation = Allocation.createFromBitmap(mRS, mBitmapIn);
-
         intrinsicBlur = ScriptIntrinsicBlur.create(mRS, mInAllocation.getElement());
 
         intrinsicBlur.setInput(mInAllocation);
-        mScript = new ScriptC_saturation(mRS);
 
+        mScript = new ScriptC_saturation(mRS);
+        scriptDim = new ScriptC_dim(mRS);
 
         mOutAllocations = new Allocation[NUM_BITMAPS];
         for (int i = 0; i < NUM_BITMAPS; ++i) {
-            mOutAllocations[i] = Allocation.createFromBitmap(mRS, mBitmapIn);
+            mOutAllocations[i] = Allocation.createFromBitmap(mRS, mBitmapsOut[i]);
         }
 
 
@@ -148,33 +183,50 @@ public class MainActivity extends Activity {
     private class RenderScriptTask extends AsyncTask<Float, Integer, Integer> {
         Boolean issued = false;
 
+
         protected Integer doInBackground(Float... values) {
             int index = -1;
             if (isCancelled() == false) {
                 issued = true;
-                index = mCurrentBitmap;
+                index = mCurrentBitmapIndex;
 
-                /*
-                 * Set global variable in RS
-                 */
-                mScript.set_saturationValue(values[0]);
-
-                /*
-                 * Invoke saturation filter kernel
-                 */
-                mScript.forEach_saturation(mInAllocation, mOutAllocations[index]);
-
-                intrinsicBlur.setRadius(values[1]);
-                intrinsicBlur.forEach(mOutAllocations[index]);
-
-
+                Allocation afterBlurAlloc = blur(values[0], index);
+                Allocation afterDimAlloc = dim(values[1], index, afterBlurAlloc);
+                saturate(values[2], index, afterDimAlloc);
                 /*
                  * Copy to bitmap and invalidate image view
                  */
                 mOutAllocations[index].copyTo(mBitmapsOut[index]);
-                mCurrentBitmap = (mCurrentBitmap + 1) % NUM_BITMAPS;
+                mCurrentBitmapIndex = (mCurrentBitmapIndex + 1) % NUM_BITMAPS;
             }
             return index;
+        }
+
+        private Allocation saturate(float value, int index,  Allocation inAllocation){
+            /*
+            * Set global variable in RS
+            */
+            mScript.set_saturationValue(value);
+
+            /*
+            * Invoke saturation filter kernel
+            */
+            mScript.forEach_saturation(inAllocation, mOutAllocations[index]);
+
+            return mOutAllocations[index];
+        }
+
+        private Allocation dim(float value, int index, Allocation inAllocation){
+            scriptDim.set_dimmingValue(value);
+
+            scriptDim.forEach_dim(inAllocation, mOutAllocations[index]);
+            return mOutAllocations[index];
+        }
+
+        private Allocation blur(float value, int index){
+            intrinsicBlur.setRadius(value);
+            intrinsicBlur.forEach(mOutAllocations[index]);
+            return mOutAllocations[index];
         }
 
         void updateView(Integer result) {
@@ -207,7 +259,7 @@ public class MainActivity extends Activity {
         if (currentTask != null)
             currentTask.cancel(false);
         currentTask = new RenderScriptTask();
-        currentTask.execute(saturationValue, blurValue);
+        currentTask.execute(blurValue, dimValue, saturationValue);
     }
 
     /*
